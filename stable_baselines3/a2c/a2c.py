@@ -4,9 +4,8 @@ import torch as th
 from gym import spaces
 from torch.nn import functional as F
 
-from stable_baselines3.common import logger
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy, BasePolicy, MultiInputActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import explained_variance
 
@@ -52,6 +51,12 @@ class A2C(OnPolicyAlgorithm):
     :param _init_setup_model: Whether or not to build the network at the creation of the instance
     """
 
+    policy_aliases: Dict[str, Type[BasePolicy]] = {
+        "MlpPolicy": ActorCriticPolicy,
+        "CnnPolicy": ActorCriticCnnPolicy,
+        "MultiInputPolicy": MultiInputActorCriticPolicy,
+    }
+
     def __init__(
         self,
         policy: Union[str, Type[ActorCriticPolicy]],
@@ -77,7 +82,7 @@ class A2C(OnPolicyAlgorithm):
         _init_setup_model: bool = True,
     ):
 
-        super(A2C, self).__init__(
+        super().__init__(
             policy,
             env,
             learning_rate=learning_rate,
@@ -120,6 +125,9 @@ class A2C(OnPolicyAlgorithm):
         Update policy using the currently gathered
         rollout buffer (one gradient step over whole data).
         """
+        # Switch to train mode (this affects batch norm / dropout)
+        self.policy.set_training_mode(True)
+
         # Update optimizer learning rate
         self._update_learning_rate(self.policy.optimizer)
 
@@ -131,7 +139,6 @@ class A2C(OnPolicyAlgorithm):
                 # Convert discrete action from float to long
                 actions = actions.long().flatten()
 
-            # TODO: avoid second computation of everything because of the gradient
             values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
             values = values.flatten()
 
@@ -166,13 +173,13 @@ class A2C(OnPolicyAlgorithm):
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
 
         self._n_updates += 1
-        logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
-        logger.record("train/explained_variance", explained_var)
-        logger.record("train/entropy_loss", entropy_loss.item())
-        logger.record("train/policy_loss", policy_loss.item())
-        logger.record("train/value_loss", value_loss.item())
+        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+        self.logger.record("train/explained_variance", explained_var)
+        self.logger.record("train/entropy_loss", entropy_loss.item())
+        self.logger.record("train/policy_loss", policy_loss.item())
+        self.logger.record("train/value_loss", value_loss.item())
         if hasattr(self.policy, "log_std"):
-            logger.record("train/std", th.exp(self.policy.log_std).mean().item())
+            self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
 
     def learn(
         self,
@@ -187,7 +194,7 @@ class A2C(OnPolicyAlgorithm):
         reset_num_timesteps: bool = True,
     ) -> "A2C":
 
-        return super(A2C, self).learn(
+        return super().learn(
             total_timesteps=total_timesteps,
             callback=callback,
             log_interval=log_interval,

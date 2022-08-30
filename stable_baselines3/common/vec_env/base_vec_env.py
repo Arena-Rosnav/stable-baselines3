@@ -1,12 +1,11 @@
 import inspect
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
 
 import cloudpickle
 import gym
 import numpy as np
-
-from stable_baselines3.common import logger
 
 # Define type aliases here to avoid circular import
 # Used when we want to access one or more VecEnv
@@ -177,7 +176,7 @@ class VecEnv(ABC):
         try:
             imgs = self.get_images()
         except NotImplementedError:
-            logger.warn(f"Render not defined for {self}")
+            warnings.warn(f"Render not defined for {self}")
             return
 
         # Create a big image by tiling images from subprocesses
@@ -306,7 +305,7 @@ class VecEnvWrapper(VecEnv):
             own_class = f"{type(self).__module__}.{type(self).__name__}"
             error_str = (
                 f"Error: Recursive attribute lookup for {name} from {own_class} is "
-                "ambiguous and hides attribute from {blocked_class}"
+                f"ambiguous and hides attribute from {blocked_class}"
             )
             raise AttributeError(error_str)
 

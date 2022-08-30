@@ -6,7 +6,7 @@ Installation
 Prerequisites
 -------------
 
-Stable-Baselines3 requires python 3.6+.
+Stable-Baselines3 requires python 3.7+ and PyTorch >= 1.11
 
 Windows 10
 ~~~~~~~~~~
@@ -30,7 +30,7 @@ To install Stable Baselines3 with pip, execute:
     pip install stable-baselines3[extra]
 
 .. note::
-        Some shells such as Zsh require quotation marks around brackets, i.e. ``pip install 'stable-baselines3[extra]'`` `More information <https://stackoverflow.com/a/30539963>`_. 
+        Some shells such as Zsh require quotation marks around brackets, i.e. ``pip install 'stable-baselines3[extra]'`` `More information <https://stackoverflow.com/a/30539963>`_.
 
 
 This includes an optional dependencies like Tensorboard, OpenCV or ``atari-py`` to train on atari games. If you do not need those, you can use:
@@ -52,6 +52,17 @@ Bleeding-edge version
 .. code-block:: bash
 
 	pip install git+https://github.com/DLR-RM/stable-baselines3
+
+
+.. note::
+
+  If you want to use latest gym version (0.24+), you have to use
+
+	.. code-block:: bash
+
+		pip install git+https://github.com/carlosluis/stable-baselines3@fix_tests
+
+  See `PR #780 <https://github.com/DLR-RM/stable-baselines3/pull/780>`_ for more information.
 
 
 Development version

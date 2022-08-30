@@ -17,6 +17,7 @@ and make use of different tricks to stabilize the learning with neural networks:
 
     MlpPolicy
     CnnPolicy
+    MultiInputPolicy
 
 
 Notes
@@ -33,27 +34,29 @@ Can I use?
 ----------
 
 -  Recurrent policies: ❌
--  Multi processing: ❌
+-  Multi processing: ✔️
 -  Gym spaces:
 
 
 ============= ====== ===========
 Space         Action Observation
 ============= ====== ===========
-Discrete      ✔      ✔
-Box           ❌      ✔
-MultiDiscrete ❌      ✔
-MultiBinary   ❌      ✔
+Discrete      ✔️      ✔️
+Box           ❌      ✔️
+MultiDiscrete ❌      ✔️
+MultiBinary   ❌      ✔️
+Dict          ❌      ✔️️
 ============= ====== ===========
 
 
 Example
 -------
 
+This example is only to demonstrate the use of the library and its functions, and the trained agents may not solve the environments. Optimized hyperparameters can be found in RL Zoo `repository <https://github.com/DLR-RM/rl-baselines3-zoo>`_.
+
 .. code-block:: python
 
   import gym
-  import numpy as np
 
   from stable_baselines3 import DQN
 
@@ -132,4 +135,7 @@ DQN Policies
   :noindex:
 
 .. autoclass:: CnnPolicy
+  :members:
+
+.. autoclass:: MultiInputPolicy
   :members:
