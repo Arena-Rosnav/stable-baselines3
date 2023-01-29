@@ -505,6 +505,9 @@ class EvalCallback(EventCallback):
                 if self.callback_on_new_best is not None:
                     continue_training = self.callback_on_new_best.on_step()
 
+            if self.callback_on_eval_end is not None:
+                self.callback_on_eval_end._on_step(self)
+
             # Trigger callback after every evaluation, if needed
             if self.callback is not None:
                 continue_training = continue_training and self._on_event()
