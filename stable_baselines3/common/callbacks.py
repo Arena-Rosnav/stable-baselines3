@@ -7,6 +7,8 @@ import gym
 import numpy as np
 import rospy
 
+from std_msgs.msg import Empty
+
 from stable_baselines3.common import base_class  # pytype: disable=pyi-error
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization, VecNormalize
@@ -500,6 +502,16 @@ class EvalCallback(EventCallback):
                         self.train_env.save(
                             os.path.join(self.best_model_save_path, "vec_normalize.pkl"))
                 self.best_mean_reward = mean_reward
+
+                ## Send new best model progress to webapp backend
+                if rospy.get_param("/is_webapp_docker", False):
+                    pub = rospy.Publisher("/training/newBestModel", Empty, queue_size=10)
+
+                    while pub.get_num_connections() <= 0:
+                        print("WAITING")
+                        pass
+
+                    pub.publish(Empty())
 
                 # Trigger callback on new best model, if needed
                 if self.callback_on_new_best is not None:
