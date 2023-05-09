@@ -625,6 +625,7 @@ class StopTrainingOnRewardThreshold(BaseCallback):
                 threshold >= 0.0 and threshold <= 1.0
             ), "Success threshold must be within 0 to 1"
         self.threshold = threshold
+        self.active_task_modes = ["staged", "dynamic_map_staged"]
 
     def _on_step(self) -> bool:
         assert self.parent is not None, (
@@ -632,7 +633,7 @@ class StopTrainingOnRewardThreshold(BaseCallback):
             "with an ``EvalCallback``"
         )
         # Convert np.bool_ to bool, otherwise callback() is False won't work
-        if rospy.get_param("/task_mode") != "staged":
+        if rospy.get_param("/task_mode") not in self.active_task_modes:
             if self.threshold_type == "rew":
                 continue_training = bool(self.parent.best_mean_reward < self.threshold)
             else:
