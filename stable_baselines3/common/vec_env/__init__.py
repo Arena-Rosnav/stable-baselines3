@@ -1,11 +1,10 @@
-# flake8: noqa F401
 import typing
 from copy import deepcopy
 from typing import Optional, Type, Union
 
 from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper, VecEnv, VecEnvWrapper
 from stable_baselines3.common.vec_env.dummy_vec_env import DummyVecEnv
-from stable_baselines3.common.vec_env.stacked_observations import StackedDictObservations, StackedObservations
+from stable_baselines3.common.vec_env.stacked_observations import StackedObservations
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 from stable_baselines3.common.vec_env.vec_check_nan import VecCheckNan
 from stable_baselines3.common.vec_env.vec_extract_dict_obs import VecExtractDictObs
@@ -72,3 +71,24 @@ def sync_envs_normalization(env: "GymEnv", eval_env: "GymEnv") -> None:
             eval_env_tmp.ret_rms = deepcopy(env_tmp.ret_rms)
         env_tmp = env_tmp.venv
         eval_env_tmp = eval_env_tmp.venv
+
+
+__all__ = [
+    "CloudpickleWrapper",
+    "VecEnv",
+    "VecEnvWrapper",
+    "DummyVecEnv",
+    "StackedObservations",
+    "SubprocVecEnv",
+    "VecCheckNan",
+    "VecExtractDictObs",
+    "VecFrameStack",
+    "VecMonitor",
+    "VecNormalize",
+    "VecTransposeImage",
+    "VecVideoRecorder",
+    "unwrap_vec_wrapper",
+    "unwrap_vec_normalize",
+    "is_vecenv_wrapped",
+    "sync_envs_normalization",
+]

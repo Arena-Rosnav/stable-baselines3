@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Type
 
-import gym
 import torch as th
+from gym import spaces
 from torch import nn
 
 from stable_baselines3.common.policies import BasePolicy
@@ -29,14 +29,14 @@ class QNetwork(BasePolicy):
 
     def __init__(
         self,
-        observation_space: gym.spaces.Space,
-        action_space: gym.spaces.Space,
-        features_extractor: nn.Module,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        features_extractor: BaseFeaturesExtractor,
         features_dim: int,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
-    ):
+    ) -> None:
         super().__init__(
             observation_space,
             action_space,
@@ -49,9 +49,7 @@ class QNetwork(BasePolicy):
 
         self.net_arch = net_arch
         self.activation_fn = activation_fn
-        self.features_extractor = features_extractor
         self.features_dim = features_dim
-        self.normalize_images = normalize_images
         action_dim = self.action_space.n  # number of actions
         q_net = create_mlp(self.features_dim, action_dim, self.net_arch, self.activation_fn)
         self.q_net = nn.Sequential(*q_net)
@@ -63,7 +61,9 @@ class QNetwork(BasePolicy):
         :param obs: Observation
         :return: The estimated Q-Value for each action.
         """
-        return self.q_net(self.extract_features(obs))
+        # For type checker:
+        assert isinstance(self.features_extractor, BaseFeaturesExtractor)
+        return self.q_net(self.extract_features(obs, self.features_extractor))
 
     def _predict(self, observation: th.Tensor, deterministic: bool = True) -> th.Tensor:
         q_values = self(observation)
@@ -107,8 +107,8 @@ class DQNPolicy(BasePolicy):
 
     def __init__(
         self,
-        observation_space: gym.spaces.Space,
-        action_space: gym.spaces.Space,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
         lr_schedule: Schedule,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
@@ -117,7 +117,7 @@ class DQNPolicy(BasePolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
         super().__init__(
             observation_space,
             action_space,
@@ -125,6 +125,7 @@ class DQNPolicy(BasePolicy):
             features_extractor_kwargs,
             optimizer_class=optimizer_class,
             optimizer_kwargs=optimizer_kwargs,
+            normalize_images=normalize_images,
         )
 
         if net_arch is None:
@@ -135,7 +136,6 @@ class DQNPolicy(BasePolicy):
 
         self.net_arch = net_arch
         self.activation_fn = activation_fn
-        self.normalize_images = normalize_images
 
         self.net_args = {
             "observation_space": self.observation_space,
@@ -145,7 +145,8 @@ class DQNPolicy(BasePolicy):
             "normalize_images": normalize_images,
         }
 
-        self.q_net, self.q_net_target = None, None
+        self.q_net: QNetwork
+        self.q_net_target: QNetwork
         self._build(lr_schedule)
 
     def _build(self, lr_schedule: Schedule) -> None:
@@ -164,7 +165,11 @@ class DQNPolicy(BasePolicy):
         self.q_net_target.set_training_mode(False)
 
         # Setup optimizer with initial learning rate
-        self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
+        self.optimizer = self.optimizer_class(  # type: ignore[call-arg]
+            self.parameters(),
+            lr=lr_schedule(1),
+            **self.optimizer_kwargs,
+        )
 
     def make_q_net(self) -> QNetwork:
         # Make sure we always have separate networks for features extractors etc
@@ -228,8 +233,8 @@ class CnnPolicy(DQNPolicy):
 
     def __init__(
         self,
-        observation_space: gym.spaces.Space,
-        action_space: gym.spaces.Space,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
         lr_schedule: Schedule,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
@@ -238,7 +243,7 @@ class CnnPolicy(DQNPolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
         super().__init__(
             observation_space,
             action_space,
@@ -273,8 +278,8 @@ class MultiInputPolicy(DQNPolicy):
 
     def __init__(
         self,
-        observation_space: gym.spaces.Dict,
-        action_space: gym.spaces.Space,
+        observation_space: spaces.Dict,
+        action_space: spaces.Space,
         lr_schedule: Schedule,
         net_arch: Optional[List[int]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
@@ -283,7 +288,7 @@ class MultiInputPolicy(DQNPolicy):
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
         super().__init__(
             observation_space,
             action_space,

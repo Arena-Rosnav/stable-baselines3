@@ -5,7 +5,7 @@ import sys
 import tempfile
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 import numpy as np
 import pandas
@@ -16,8 +16,12 @@ try:
     from torch.utils.tensorboard import SummaryWriter
     from torch.utils.tensorboard.summary import hparams
 except ImportError:
-    SummaryWriter = None
+    SummaryWriter = None  # type: ignore[misc, assignment]
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 
 DEBUG = 10
 INFO = 20
@@ -34,7 +38,7 @@ class Video:
     :param fps: frames per second
     """
 
-    def __init__(self, frames: th.Tensor, fps: Union[float, int]):
+    def __init__(self, frames: th.Tensor, fps: float):
         self.frames = frames
         self.fps = fps
 
@@ -69,14 +73,14 @@ class Image:
 
 class HParam:
     """
-    Hyperparameter data class storing hyperparameters and metrics in dictionnaries
+    Hyperparameter data class storing hyperparameters and metrics in dictionaries
 
     :param hparam_dict: key-value pairs of hyperparameters to log
     :param metric_dict: key-value pairs of metrics to log
         A non-empty metrics dict is required to display hyperparameters in the corresponding Tensorboard section.
     """
 
-    def __init__(self, hparam_dict: Dict[str, Union[bool, str, float, int, None]], metric_dict: Dict[str, Union[float, int]]):
+    def __init__(self, hparam_dict: Mapping[str, Union[bool, str, float, None]], metric_dict: Mapping[str, float]):
         self.hparam_dict = hparam_dict
         if not metric_dict:
             raise Exception("`metric_dict` must not be empty to display hyperparameters to the HPARAMS tensorboard tab.")
@@ -157,7 +161,7 @@ class HumanOutputFormat(KVWriter, SeqWriter):
     def __init__(self, filename_or_file: Union[str, TextIO], max_length: int = 36):
         self.max_length = max_length
         if isinstance(filename_or_file, str):
-            self.file = open(filename_or_file, "wt")
+            self.file = open(filename_or_file, "w")
             self.own_file = True
         else:
             assert hasattr(filename_or_file, "write"), f"Expected file or str, got {filename_or_file}"
@@ -169,7 +173,6 @@ class HumanOutputFormat(KVWriter, SeqWriter):
         key2str = {}
         tag = None
         for (key, value), (_, excluded) in zip(sorted(key_values.items()), sorted(key_excluded.items())):
-
             if excluded is not None and ("stdout" in excluded or "log" in excluded):
                 continue
 
@@ -193,35 +196,41 @@ class HumanOutputFormat(KVWriter, SeqWriter):
 
             if key.find("/") > 0:  # Find tag and add it to the dict
                 tag = key[: key.find("/") + 1]
-                key2str[self._truncate(tag)] = ""
+                key2str[(tag, self._truncate(tag))] = ""
             # Remove tag from key
             if tag is not None and tag in key:
                 key = str("   " + key[len(tag) :])
 
             truncated_key = self._truncate(key)
-            if truncated_key in key2str:
+            if (tag, truncated_key) in key2str:
                 raise ValueError(
                     f"Key '{key}' truncated to '{truncated_key}' that already exists. Consider increasing `max_length`."
                 )
-            key2str[truncated_key] = self._truncate(value_str)
+            key2str[(tag, truncated_key)] = self._truncate(value_str)
 
         # Find max widths
         if len(key2str) == 0:
             warnings.warn("Tried to write empty key-value dict")
             return
         else:
-            key_width = max(map(len, key2str.keys()))
+            tagless_keys = map(lambda x: x[1], key2str.keys())
+            key_width = max(map(len, tagless_keys))
             val_width = max(map(len, key2str.values()))
 
         # Write out the data
         dashes = "-" * (key_width + val_width + 7)
         lines = [dashes]
-        for key, value in key2str.items():
+        for (_, key), value in key2str.items():
             key_space = " " * (key_width - len(key))
             val_space = " " * (val_width - len(value))
             lines.append(f"| {key}{key_space} | {value}{val_space} |")
         lines.append(dashes)
-        self.file.write("\n".join(lines) + "\n")
+
+        if tqdm is not None and hasattr(self.file, "name") and self.file.name == "<stdout>":
+            # Do not mess up with progress bar
+            tqdm.write("\n".join(lines) + "\n", file=sys.stdout, end="")
+        else:
+            self.file.write("\n".join(lines) + "\n")
 
         # Flush the output to the file
         self.file.flush()
@@ -274,7 +283,7 @@ class JSONOutputFormat(KVWriter):
     """
 
     def __init__(self, filename: str):
-        self.file = open(filename, "wt")
+        self.file = open(filename, "w")
 
     def write(self, key_values: Dict[str, Any], key_excluded: Dict[str, Union[str, Tuple[str, ...]]], step: int = 0) -> None:
         def cast_to_json_serializable(value: Any):
@@ -319,7 +328,7 @@ class CSVOutputFormat(KVWriter):
 
     def __init__(self, filename: str):
         self.file = open(filename, "w+t")
-        self.keys = []
+        self.keys: List[str] = []
         self.separator = ","
         self.quotechar = '"'
 
@@ -332,7 +341,7 @@ class CSVOutputFormat(KVWriter):
             self.file.seek(0)
             lines = self.file.readlines()
             self.file.seek(0)
-            for (i, key) in enumerate(self.keys):
+            for i, key in enumerate(self.keys):
                 if i > 0:
                     self.file.write(",")
                 self.file.write(key)
@@ -389,9 +398,7 @@ class TensorBoardOutputFormat(KVWriter):
         self.writer = SummaryWriter(log_dir=folder)
 
     def write(self, key_values: Dict[str, Any], key_excluded: Dict[str, Union[str, Tuple[str, ...]]], step: int = 0) -> None:
-
         for (key, value), (_, excluded) in zip(sorted(key_values.items()), sorted(key_excluded.items())):
-
             if excluded is not None and "tensorboard" in excluded:
                 continue
 
