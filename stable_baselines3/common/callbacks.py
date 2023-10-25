@@ -9,23 +9,43 @@ import rospy
 
 from std_msgs.msg import Empty
 
+from stable_baselines3.common.logger import Logger
+
+try:
+    from tqdm import TqdmExperimentalWarning
+
+    # Remove experimental warning
+    warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
+    from tqdm.rich import tqdm
+except ImportError:
+    # Rich not installed, we only throw an error
+    # if the progress bar is used
+    tqdm = None
+
 from stable_baselines3.common import base_class  # pytype: disable=pyi-error
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization, VecNormalize
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    VecEnv,
+    sync_envs_normalization,
+    VecNormalize,
+)
 
 
 class BaseCallback(ABC):
     """
     Base class for callback.
 
-    :param verbose: Verbosity of the output (set to 1 for info messages,
-        2 for debug)
+    :param verbose: Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
     """
+
+    # The RL model
+    # Type hint as string to avoid circular import
+    model: "base_class.BaseAlgorithm"
+    logger: Logger
 
     def __init__(self, verbose: int = 0):
         super().__init__()
-        # The RL model
-        self.model = None  # type: Optional[base_class.BaseAlgorithm]
         # An alias for self.model.get_env(), the environment used for training
         self.training_env = None  # type: Union[gym.Env, VecEnv, None]
         # Number of time the callback was called
@@ -35,7 +55,6 @@ class BaseCallback(ABC):
         self.verbose = verbose
         self.locals: Dict[str, Any] = {}
         self.globals: Dict[str, Any] = {}
-        self.logger = None
         # Sometimes, for event callback, it is useful
         # to have access to the parent object
         self.parent = None  # type: Optional[BaseCallback]
@@ -54,10 +73,14 @@ class BaseCallback(ABC):
     def _init_callback(self) -> None:
         pass
 
-    def on_training_start(self, locals_: Dict[str, Any], globals_: Dict[str, Any]) -> None:
+    def on_training_start(
+        self, locals_: Dict[str, Any], globals_: Dict[str, Any]
+    ) -> None:
         # Those are reference and will be updated automatically
         self.locals = locals_
         self.globals = globals_
+        # Update num_timesteps in case training was done before
+        self.num_timesteps = self.model.num_timesteps
         self._on_training_start()
 
     def _on_training_start(self) -> None:
@@ -86,7 +109,6 @@ class BaseCallback(ABC):
         :return: If the callback returns False, training is aborted early.
         """
         self.n_calls += 1
-        # timesteps start at zero
         self.num_timesteps = self.model.num_timesteps
 
         return self._on_step()
@@ -127,7 +149,7 @@ class EventCallback(BaseCallback):
 
     :param callback: Callback that will be called
         when an event is triggered.
-    :param verbose:
+    :param verbose: Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
     """
 
     def __init__(self, callback: Optional[BaseCallback] = None, verbose: int = 0):
@@ -234,7 +256,7 @@ class CheckpointCallback(BaseCallback):
     :param name_prefix: Common prefix to the saved models
     :param save_replay_buffer: Save the model replay buffer
     :param save_vecnormalize: Save the ``VecNormalize`` statistics
-    :param verbose: Verbosity of the output (set to 2 for debug messages)
+    :param verbose: Verbosity level: 0 for no output, 2 for indicating when saving model checkpoint
     """
 
     def __init__(
@@ -267,27 +289,43 @@ class CheckpointCallback(BaseCallback):
         :param extension: Checkpoint file extension (zip for model, pkl for others)
         :return: Path to the checkpoint
         """
-        return os.path.join(self.save_path, f"{self.name_prefix}_{checkpoint_type}{self.num_timesteps}_steps.{extension}")
+        return os.path.join(
+            self.save_path,
+            f"{self.name_prefix}_{checkpoint_type}{self.num_timesteps}_steps.{extension}",
+        )
 
     def _on_step(self) -> bool:
         if self.n_calls % self.save_freq == 0:
             model_path = self._checkpoint_path(extension="zip")
             self.model.save(model_path)
-            if self.verbose > 1:
+            if self.verbose >= 2:
                 print(f"Saving model checkpoint to {model_path}")
 
-            if self.save_replay_buffer and hasattr(self.model, "replay_buffer") and self.model.replay_buffer is not None:
+            if (
+                self.save_replay_buffer
+                and hasattr(self.model, "replay_buffer")
+                and self.model.replay_buffer is not None
+            ):
                 # If model has a replay buffer, save it too
-                replay_buffer_path = self._checkpoint_path("replay_buffer_", extension="pkl")
+                replay_buffer_path = self._checkpoint_path(
+                    "replay_buffer_", extension="pkl"
+                )
                 self.model.save_replay_buffer(replay_buffer_path)
                 if self.verbose > 1:
-                    print(f"Saving model replay buffer checkpoint to {replay_buffer_path}")
+                    print(
+                        f"Saving model replay buffer checkpoint to {replay_buffer_path}"
+                    )
 
-            if self.save_vecnormalize and self.model.get_vec_normalize_env() is not None:
+            if (
+                self.save_vecnormalize
+                and self.model.get_vec_normalize_env() is not None
+            ):
                 # Save the VecNormalize statistics
-                vec_normalize_path = self._checkpoint_path("vecnormalize_", extension="pkl")
+                vec_normalize_path = self._checkpoint_path(
+                    "vecnormalize_", extension="pkl"
+                )
                 self.model.get_vec_normalize_env().save(vec_normalize_path)
-                if self.verbose > 1:
+                if self.verbose >= 2:
                     print(f"Saving model VecNormalize to {vec_normalize_path}")
 
         return True
@@ -298,10 +336,14 @@ class ConvertCallback(BaseCallback):
     Convert functional callback (old-style) to object.
 
     :param callback:
-    :param verbose:
+    :param verbose: Verbosity level: 0 for no output, 1 for info messages, 2 for debug messages
     """
 
-    def __init__(self, callback: Callable[[Dict[str, Any], Dict[str, Any]], bool], verbose: int = 0):
+    def __init__(
+        self,
+        callback: Callable[[Dict[str, Any], Dict[str, Any]], bool],
+        verbose: int = 0,
+    ):
         super().__init__(verbose)
         self.callback = callback
 
@@ -322,7 +364,7 @@ class EvalCallback(EventCallback):
       To account for that, you can use ``eval_freq = max(eval_freq // n_envs, 1)``
 
     :param eval_env: The environment used for initialization
-    :param train_env: The environment used for saving moving average of VecNormalize 
+    :param train_env: The environment used for saving moving average of VecNormalize
     :param callback_on_new_best: Callback to trigger
         when there is a new best model according to the ``mean_reward``
     :param callback_after_eval: Callback to trigger after every evaluation
@@ -335,7 +377,7 @@ class EvalCallback(EventCallback):
     :param deterministic: Whether the evaluation should
         use a stochastic or deterministic actions.
     :param render: Whether to render or not the environment during evaluation
-    :param verbose:
+    :param verbose: Verbosity level: 0 for no output, 1 for indicating information about evaluation results
     :param warn: Passed to ``evaluate_policy`` (warns if ``eval_env`` has not been
         wrapped with a Monitor wrapper)
     """
@@ -394,7 +436,10 @@ class EvalCallback(EventCallback):
     def _init_callback(self) -> None:
         # Does not work in some corner cases, where the wrapper is not the same
         if not isinstance(self.training_env, type(self.eval_env)):
-            warnings.warn("Training and eval env are not of the same type" f"{self.training_env} != {self.eval_env}")
+            warnings.warn(
+                "Training and eval env are not of the same type"
+                f"{self.training_env} != {self.eval_env}"
+            )
 
         # Create folders if needed
         if self.best_model_save_path is not None:
@@ -406,7 +451,9 @@ class EvalCallback(EventCallback):
         if self.callback_on_new_best is not None:
             self.callback_on_new_best.init_callback(self.model)
 
-    def _log_success_callback(self, locals_: Dict[str, Any], globals_: Dict[str, Any]) -> None:
+    def _log_success_callback(
+        self, locals_: Dict[str, Any], globals_: Dict[str, Any]
+    ) -> None:
         """
         Callback passed to the  ``evaluate_policy`` function
         in order to log the success rate (when applicable),
@@ -423,7 +470,6 @@ class EvalCallback(EventCallback):
                 self._is_success_buffer.append(maybe_is_success)
 
     def _on_step(self) -> bool:
-
         continue_training = True
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
@@ -472,11 +518,16 @@ class EvalCallback(EventCallback):
                 )
 
             mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
-            mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
+            mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(
+                episode_lengths
+            )
             self.last_mean_reward = mean_reward
 
-            if self.verbose > 0:
-                print(f"Eval num_timesteps={self.num_timesteps}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+            if self.verbose >= 1:
+                print(
+                    f"Eval num_timesteps={self.num_timesteps}, "
+                    f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}"
+                )
                 print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
@@ -484,28 +535,35 @@ class EvalCallback(EventCallback):
 
             if len(self._is_success_buffer) > 0:
                 success_rate = np.mean(self._is_success_buffer)
-                if self.verbose > 0:
+                if self.verbose >= 1:
                     print(f"Success rate: {100 * success_rate:.2f}%")
                 self.logger.record("eval/success_rate", success_rate)
                 self.last_success_rate = success_rate
 
             # Dump log so the evaluation results are printed with the correct timestep
-            self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
+            self.logger.record(
+                "time/total_timesteps", self.num_timesteps, exclude="tensorboard"
+            )
             self.logger.dump(self.num_timesteps)
 
             if mean_reward > self.best_mean_reward:
-                if self.verbose > 0:
+                if self.verbose >= 1:
                     print("New best mean reward!")
                 if self.best_model_save_path is not None:
-                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                    self.model.save(
+                        os.path.join(self.best_model_save_path, "best_model")
+                    )
                     if isinstance(self.train_env, VecNormalize):
                         self.train_env.save(
-                            os.path.join(self.best_model_save_path, "vec_normalize.pkl"))
+                            os.path.join(self.best_model_save_path, "vec_normalize.pkl")
+                        )
                 self.best_mean_reward = mean_reward
 
                 ## Send new best model progress to webapp backend
                 if rospy.get_param("/is_webapp_docker", False):
-                    pub = rospy.Publisher("/training/newBestModel", Empty, queue_size=10)
+                    pub = rospy.Publisher(
+                        "/training/newBestModel", Empty, queue_size=10
+                    )
 
                     while pub.get_num_connections() <= 0:
                         print("WAITING")
@@ -547,24 +605,35 @@ class StopTrainingOnRewardThreshold(BaseCallback):
         stoppage criteria (rew or succ)
     :param threshold:  Minimum expected reward per episode
         to stop training.
-    :param verbose:
+    :param verbose: Verbosity level: 0 for no output, 1 for indicating when training ended because episodic reward
+        threshold reached
     """
 
-    def __init__(self, treshhold_type: str="rew", threshold: float=14.5, verbose: int = 0):
+    def __init__(
+        self, treshhold_type: str = "rew", threshold: float = 14.5, verbose: int = 0
+    ):
         super(StopTrainingOnRewardThreshold, self).__init__(verbose=verbose)
         self.threshold_type = treshhold_type
-        assert self.threshold_type == "rew" or self.threshold_type == "succ", "Threshold type must be 'rew' or 'succ'!"
-        
+        assert (
+            self.threshold_type == "rew" or self.threshold_type == "succ"
+        ), "Threshold type must be 'rew' or 'succ'!"
+
         if self.threshold_type == "rew":
             assert threshold > 0, "Reward threshold must be positive"
         else:
-            assert threshold >= 0.0 and threshold <= 1.0, "Success threshold must be within 0 to 1"
+            assert (
+                threshold >= 0.0 and threshold <= 1.0
+            ), "Success threshold must be within 0 to 1"
         self.threshold = threshold
+        self.active_task_modes = ["staged", "dynamic_map_staged"]
 
     def _on_step(self) -> bool:
-        assert self.parent is not None, "``StopTrainingOnMinimumReward`` callback must be used " "with an ``EvalCallback``"
+        assert self.parent is not None, (
+            "``StopTrainingOnMinimumReward`` callback must be used "
+            "with an ``EvalCallback``"
+        )
         # Convert np.bool_ to bool, otherwise callback() is False won't work
-        if rospy.get_param("/task_mode") != "staged":
+        if rospy.get_param("/task_mode") not in self.active_task_modes:
             if self.threshold_type == "rew":
                 continue_training = bool(self.parent.best_mean_reward < self.threshold)
             else:
@@ -572,12 +641,14 @@ class StopTrainingOnRewardThreshold(BaseCallback):
         else:
             if self.threshold_type == "rew":
                 continue_training = not bool(
-                    self.parent.best_mean_reward >= self.threshold and
-                    rospy.get_param("/last_stage_reached"))
+                    self.parent.best_mean_reward >= self.threshold
+                    and rospy.get_param("/last_stage_reached")
+                )
             else:
                 continue_training = not bool(
-                    self.parent.last_success_rate >= self.threshold and
-                    rospy.get_param("/last_stage_reached"))
+                    self.parent.last_success_rate >= self.threshold
+                    and rospy.get_param("/last_stage_reached")
+                )
         if self.verbose > 0 and not continue_training:
             if self.threshold_type == "rew":
                 print(
@@ -594,7 +665,7 @@ class StopTrainingOnRewardThreshold(BaseCallback):
 
 class EveryNTimesteps(EventCallback):
     """
-    Trigger a callback every ``n_steps`` timesteps
+    Trigger a callback every ``n_steps`` timesteps
 
     :param n_steps: Number of timesteps between two trigger.
     :param callback: Callback that will be called
@@ -621,7 +692,8 @@ class StopTrainingOnMaxEpisodes(BaseCallback):
     and in total for ``max_episodes * n_envs`` episodes.
 
     :param max_episodes: Maximum number of episodes to stop training.
-    :param verbose: Select whether to print information about when training ended by reaching ``max_episodes``
+    :param verbose: Verbosity level: 0 for no output, 1 for indicating information about when training ended by
+        reaching ``max_episodes``
     """
 
     def __init__(self, max_episodes: int, verbose: int = 0):
@@ -636,15 +708,19 @@ class StopTrainingOnMaxEpisodes(BaseCallback):
 
     def _on_step(self) -> bool:
         # Check that the `dones` local variable is defined
-        assert "dones" in self.locals, "`dones` variable is not defined, please check your code next to `callback.on_step()`"
+        assert (
+            "dones" in self.locals
+        ), "`dones` variable is not defined, please check your code next to `callback.on_step()`"
         self.n_episodes += np.sum(self.locals["dones"]).item()
 
         continue_training = self.n_episodes < self._total_max_episodes
 
-        if self.verbose > 0 and not continue_training:
+        if self.verbose >= 1 and not continue_training:
             mean_episodes_per_env = self.n_episodes / self.training_env.num_envs
             mean_ep_str = (
-                f"with an average of {mean_episodes_per_env:.2f} episodes per env" if self.training_env.num_envs > 1 else ""
+                f"with an average of {mean_episodes_per_env:.2f} episodes per env"
+                if self.training_env.num_envs > 1
+                else ""
             )
 
             print(
@@ -666,10 +742,12 @@ class StopTrainingOnNoModelImprovement(BaseCallback):
 
     :param max_no_improvement_evals: Maximum number of consecutive evaluations without a new best model.
     :param min_evals: Number of evaluations before start to count evaluations without improvements.
-    :param verbose: Verbosity of the output (set to 1 for info messages)
+    :param verbose: Verbosity level: 0 for no output, 1 for indicating when training ended because no new best model
     """
 
-    def __init__(self, max_no_improvement_evals: int, min_evals: int = 0, verbose: int = 0):
+    def __init__(
+        self, max_no_improvement_evals: int, min_evals: int = 0, verbose: int = 0
+    ):
         super().__init__(verbose=verbose)
         self.max_no_improvement_evals = max_no_improvement_evals
         self.min_evals = min_evals
@@ -677,7 +755,9 @@ class StopTrainingOnNoModelImprovement(BaseCallback):
         self.no_improvement_evals = 0
 
     def _on_step(self) -> bool:
-        assert self.parent is not None, "``StopTrainingOnNoModelImprovement`` callback must be used with an ``EvalCallback``"
+        assert (
+            self.parent is not None
+        ), "``StopTrainingOnNoModelImprovement`` callback must be used with an ``EvalCallback``"
 
         continue_training = True
 
@@ -691,9 +771,43 @@ class StopTrainingOnNoModelImprovement(BaseCallback):
 
         self.last_best_mean_reward = self.parent.best_mean_reward
 
-        if self.verbose > 0 and not continue_training:
+        if self.verbose >= 1 and not continue_training:
             print(
                 f"Stopping training because there was no new best model in the last {self.no_improvement_evals:d} evaluations"
             )
 
         return continue_training
+
+
+class ProgressBarCallback(BaseCallback):
+    """
+    Display a progress bar when training SB3 agent
+    using tqdm and rich packages.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        if tqdm is None:
+            raise ImportError(
+                "You must install tqdm and rich in order to use the progress bar callback. "
+                "It is included if you install stable-baselines with the extra packages: "
+                "`pip install stable-baselines3[extra]`"
+            )
+        self.pbar = None
+
+    def _on_training_start(self) -> None:
+        # Initialize progress bar
+        # Remove timesteps that were done in previous training sessions
+        self.pbar = tqdm(
+            total=self.locals["total_timesteps"] - self.model.num_timesteps
+        )
+
+    def _on_step(self) -> bool:
+        # Update progress bar, we do num_envs steps per call to `env.step()`
+        self.pbar.update(self.training_env.num_envs)
+        return True
+
+    def _on_training_end(self) -> None:
+        # Flush and close progress bar
+        self.pbar.refresh()
+        self.pbar.close()

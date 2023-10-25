@@ -1,4 +1,6 @@
+import importlib.util
 import os
+import sys
 import time
 from typing import Sequence
 from unittest import mock
@@ -7,6 +9,7 @@ import gym
 import numpy as np
 import pytest
 import torch as th
+from gym import spaces
 from matplotlib import pyplot as plt
 from pandas.errors import EmptyDataError
 
@@ -231,11 +234,7 @@ def test_report_video_to_tensorboard(tmp_path, read_log, capsys):
 
 
 def is_moviepy_installed():
-    try:
-        import moviepy  # noqa: F401
-    except ModuleNotFoundError:
-        return False
-    return True
+    return importlib.util.find_spec("moviepy") is not None
 
 
 @pytest.mark.parametrize("unsupported_format", ["stdout", "log", "json", "csv"])
@@ -349,8 +348,8 @@ class TimeDelayEnv(gym.Env):
     def __init__(self, delay: float = 0.01):
         super().__init__()
         self.delay = delay
-        self.observation_space = gym.spaces.Box(low=-20.0, high=20.0, shape=(4,), dtype=np.float32)
-        self.action_space = gym.spaces.Discrete(2)
+        self.observation_space = spaces.Box(low=-20.0, high=20.0, shape=(4,), dtype=np.float32)
+        self.action_space = spaces.Discrete(2)
 
     def reset(self):
         return self.observation_space.sample()
@@ -409,3 +408,22 @@ def test_fps_no_div_zero(algo):
         with mock.patch("time.time_ns", lambda: 42.0):
             model = algo("MlpPolicy", "CartPole-v1")
             model.learn(total_timesteps=100)
+
+
+def test_human_output_format_no_crash_on_same_keys_different_tags():
+    o = HumanOutputFormat(sys.stdout, max_length=60)
+    o.write(
+        {"key1/foo": "value1", "key1/bar": "value2", "key2/bizz": "value3", "key2/foo": "value4"},
+        {"key1/foo": None, "key2/bizz": None, "key1/bar": None, "key2/foo": None},
+    )
+
+
+@pytest.mark.parametrize("algo", [A2C, DQN])
+@pytest.mark.parametrize("stats_window_size", [1, 42])
+def test_ep_buffers_stats_window_size(algo, stats_window_size):
+    """Set stats_window_size for logging to non-default value and check if
+    ep_info_buffer and ep_success_buffer are initialized to the correct length"""
+    model = algo("MlpPolicy", "CartPole-v1", stats_window_size=stats_window_size)
+    model.learn(total_timesteps=10)
+    assert model.ep_info_buffer.maxlen == stats_window_size
+    assert model.ep_success_buffer.maxlen == stats_window_size

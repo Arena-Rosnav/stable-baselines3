@@ -1,9 +1,8 @@
 """Probability distributions."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
 
-import gym
 import numpy as np
 import torch as th
 from gym import spaces
@@ -11,6 +10,16 @@ from torch import nn
 from torch.distributions import Bernoulli, Categorical, Normal
 
 from stable_baselines3.common.preprocessing import get_action_dim
+
+SelfDistribution = TypeVar("SelfDistribution", bound="Distribution")
+SelfDiagGaussianDistribution = TypeVar("SelfDiagGaussianDistribution", bound="DiagGaussianDistribution")
+SelfSquashedDiagGaussianDistribution = TypeVar(
+    "SelfSquashedDiagGaussianDistribution", bound="SquashedDiagGaussianDistribution"
+)
+SelfCategoricalDistribution = TypeVar("SelfCategoricalDistribution", bound="CategoricalDistribution")
+SelfMultiCategoricalDistribution = TypeVar("SelfMultiCategoricalDistribution", bound="MultiCategoricalDistribution")
+SelfBernoulliDistribution = TypeVar("SelfBernoulliDistribution", bound="BernoulliDistribution")
+SelfStateDependentNoiseDistribution = TypeVar("SelfStateDependentNoiseDistribution", bound="StateDependentNoiseDistribution")
 
 
 class Distribution(ABC):
@@ -28,7 +37,7 @@ class Distribution(ABC):
         concrete classes."""
 
     @abstractmethod
-    def proba_distribution(self, *args, **kwargs) -> "Distribution":
+    def proba_distribution(self: SelfDistribution, *args, **kwargs) -> SelfDistribution:
         """Set parameters of the distribution.
 
         :return: self
@@ -141,7 +150,9 @@ class DiagGaussianDistribution(Distribution):
         log_std = nn.Parameter(th.ones(self.action_dim) * log_std_init, requires_grad=True)
         return mean_actions, log_std
 
-    def proba_distribution(self, mean_actions: th.Tensor, log_std: th.Tensor) -> "DiagGaussianDistribution":
+    def proba_distribution(
+        self: SelfDiagGaussianDistribution, mean_actions: th.Tensor, log_std: th.Tensor
+    ) -> SelfDiagGaussianDistribution:
         """
         Create the distribution given its parameters (mean, std)
 
@@ -207,7 +218,9 @@ class SquashedDiagGaussianDistribution(DiagGaussianDistribution):
         self.epsilon = epsilon
         self.gaussian_actions = None
 
-    def proba_distribution(self, mean_actions: th.Tensor, log_std: th.Tensor) -> "SquashedDiagGaussianDistribution":
+    def proba_distribution(
+        self: SelfSquashedDiagGaussianDistribution, mean_actions: th.Tensor, log_std: th.Tensor
+    ) -> SelfSquashedDiagGaussianDistribution:
         super().proba_distribution(mean_actions, log_std)
         return self
 
@@ -271,7 +284,7 @@ class CategoricalDistribution(Distribution):
         action_logits = nn.Linear(latent_dim, self.action_dim)
         return action_logits
 
-    def proba_distribution(self, action_logits: th.Tensor) -> "CategoricalDistribution":
+    def proba_distribution(self: SelfCategoricalDistribution, action_logits: th.Tensor) -> SelfCategoricalDistribution:
         self.distribution = Categorical(logits=action_logits)
         return self
 
@@ -323,7 +336,9 @@ class MultiCategoricalDistribution(Distribution):
         action_logits = nn.Linear(latent_dim, sum(self.action_dims))
         return action_logits
 
-    def proba_distribution(self, action_logits: th.Tensor) -> "MultiCategoricalDistribution":
+    def proba_distribution(
+        self: SelfMultiCategoricalDistribution, action_logits: th.Tensor
+    ) -> SelfMultiCategoricalDistribution:
         self.distribution = [Categorical(logits=split) for split in th.split(action_logits, tuple(self.action_dims), dim=1)]
         return self
 
@@ -376,7 +391,7 @@ class BernoulliDistribution(Distribution):
         action_logits = nn.Linear(latent_dim, self.action_dims)
         return action_logits
 
-    def proba_distribution(self, action_logits: th.Tensor) -> "BernoulliDistribution":
+    def proba_distribution(self: SelfBernoulliDistribution, action_logits: th.Tensor) -> SelfBernoulliDistribution:
         self.distribution = Bernoulli(logits=action_logits)
         return self
 
@@ -520,8 +535,8 @@ class StateDependentNoiseDistribution(Distribution):
         return mean_actions_net, log_std
 
     def proba_distribution(
-        self, mean_actions: th.Tensor, log_std: th.Tensor, latent_sde: th.Tensor
-    ) -> "StateDependentNoiseDistribution":
+        self: SelfStateDependentNoiseDistribution, mean_actions: th.Tensor, log_std: th.Tensor, latent_sde: th.Tensor
+    ) -> SelfStateDependentNoiseDistribution:
         """
         Create the distribution given its parameters (mean, std)
 
@@ -602,7 +617,6 @@ class TanhBijector:
     """
     Bijective transformation of a probability distribution
     using a squashing function (tanh)
-    TODO: use Pyro instead (https://pyro.ai/)
 
     :param epsilon: small value to avoid NaN due to numerical imprecision.
     """
@@ -643,7 +657,7 @@ class TanhBijector:
 
 
 def make_proba_distribution(
-    action_space: gym.spaces.Space, use_sde: bool = False, dist_kwargs: Optional[Dict[str, Any]] = None
+    action_space: spaces.Space, use_sde: bool = False, dist_kwargs: Optional[Dict[str, Any]] = None
 ) -> Distribution:
     """
     Return an instance of Distribution for the correct type of action space
@@ -663,7 +677,7 @@ def make_proba_distribution(
     elif isinstance(action_space, spaces.Discrete):
         return CategoricalDistribution(action_space.n, **dist_kwargs)
     elif isinstance(action_space, spaces.MultiDiscrete):
-        return MultiCategoricalDistribution(action_space.nvec, **dist_kwargs)
+        return MultiCategoricalDistribution(list(action_space.nvec), **dist_kwargs)
     elif isinstance(action_space, spaces.MultiBinary):
         return BernoulliDistribution(action_space.n, **dist_kwargs)
     else:
